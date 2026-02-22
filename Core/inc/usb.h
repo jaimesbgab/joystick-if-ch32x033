@@ -12,28 +12,29 @@ typedef enum {
     USB_NO_DATA = -3
 } usb_status_t;
 
-/* Initialize USB device */
+/* Initialize USB CDC device */
 void usb_init(void);
 
-/* Send data on EP2 (main data endpoint) */
+/* Send data to host via CDC bulk IN (EP2) */
 usb_status_t usb_write(const uint8_t *data, uint16_t len);
 
-/* Send event/periodic data on EP3 */
-usb_status_t usb_send_event(const uint8_t *data, uint16_t len);
-
-/* Read data from EP1 (returns number of bytes read, or negative on error) */
+/* Read data received from host via CDC bulk OUT (EP1 ring buffer).
+ * Returns number of bytes copied, or negative on error/no data. */
 int usb_read(uint8_t *data, uint16_t max_len);
 
-/* Check if data is available to read from EP1 */
+/* Returns the byte count of the next available packet (0 if none) */
 uint16_t usb_data_available(void);
 
-/* Check if USB is ready to send on EP2 */
+/* Returns true if CDC bulk IN (EP2) is free to send */
 bool usb_is_ready(void);
 
-/* Check if USB is ready to send on EP3 */
-bool usb_event_is_ready(void);
-
-/* Check if USB is connected and enumerated */
+/* Returns true if the device is enumerated by the host */
 bool usb_is_connected(void);
+
+/* Single-character output for xprintf — buffers and flushes on '\n' or full */
+void usb_putc(char c);
+
+/* Flush the internal TX buffer over USB CDC (no-op if nothing buffered) */
+void usb_flush(void);
 
 #endif /* __USB_H */

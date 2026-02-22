@@ -3,11 +3,11 @@
  * Author             : WCH
  * Version            : V1.0.0
  * Date               : 2024/04/16
- * Description        : usb device descriptor,configuration descriptor,
+ * Description        : USB CDC-ACM device descriptor, configuration descriptor,
  *                      string descriptors and other descriptors.
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
-* Attention: This software (modified or not) and binary are used for 
+* Attention: This software (modified or not) and binary are used for
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 
@@ -16,99 +16,113 @@
 /* Device Descriptor */
 const uint8_t  MyDevDescr[] =
 {
-    0x12,                                               // bLength
-    0x01,                                               // bDescriptorType (Device)
-    0x10, 0x01,                                         // bcdUSB 1.10
-    0x00,                                               // bDeviceClass (Use class information in the Interface Descriptors)
-    0x00,                                               // bDeviceSubClass
-    0x00,                                               // bDeviceProtocol
-    DEF_USBD_UEP0_SIZE,                                 // bMaxPacketSize0
+    0x12,                                                // bLength
+    0x01,                                                // bDescriptorType (Device)
+    0x10, 0x01,                                          // bcdUSB 1.10
+    0x02,                                                // bDeviceClass (CDC)
+    0x00,                                                // bDeviceSubClass
+    0x00,                                                // bDeviceProtocol
+    DEF_USBD_UEP0_SIZE,                                  // bMaxPacketSize0
     (uint8_t)DEF_USB_VID, (uint8_t)(DEF_USB_VID >> 8),  // idVendor 0x1A86
     (uint8_t)DEF_USB_PID, (uint8_t)(DEF_USB_PID >> 8),  // idProduct 0xFE07
-    0x00, DEF_IC_PRG_VER,                               // bcdDevice 1.00
-    0x01,                                               // iManufacturer (String Index)
-    0x02,                                               // iProduct (String Index)
-    0x03,                                               // iSerialNumber (String Index)
-    0x01,                                               // bNumConfigurations 1
+    0x00, DEF_IC_PRG_VER,                                // bcdDevice 1.00
+    0x01,                                                // iManufacturer (String Index)
+    0x02,                                                // iProduct (String Index)
+    0x03,                                                // iSerialNumber (String Index)
+    0x01,                                                // bNumConfigurations 1
 };
 
-/* Configuration Descriptor */
+/*
+ * Configuration Descriptor
+ *
+ * Total length = 9 (Config) + 9 (IF0 CDC Control) + 5 (Header) + 4 (ACM) +
+ *                5 (Union) + 5 (Call Mgmt) + 7 (EP3 IN Interrupt) +
+ *                9 (IF1 CDC Data) + 7 (EP1 OUT Bulk) + 7 (EP2 IN Bulk)
+ *              = 67 = 0x43
+ */
 const uint8_t  MyCfgDescr[] =
 {
-    /* Configuration Descriptor */
+    /* Configuration Descriptor (9 bytes) */
     0x09,                           // bLength
-    0x02,                           // bDescriptorType
-    0x30, 0x00,                     // wTotalLength (updated for 3 endpoints)
-    0x01,                           // bNumInterfaces
+    0x02,                           // bDescriptorType (Configuration)
+    0x43, 0x00,                     // wTotalLength 67
+    0x02,                           // bNumInterfaces 2
     0x01,                           // bConfigurationValue
-    0x03,                           // iConfiguration (String Index)
-    0x80,                           // bmAttributes Remote Wakeup
-    0x23,                           // bMaxPower 70mA
+    0x00,                           // iConfiguration
+    0x80,                           // bmAttributes: Bus-powered
+    0x32,                           // bMaxPower 100mA
 
-    /* Interface Descriptor */
+    /* Interface 0 - CDC Control Interface (9 bytes) */
     0x09,                           // bLength
     0x04,                           // bDescriptorType (Interface)
     0x00,                           // bInterfaceNumber 0
     0x00,                           // bAlternateSetting
-    0x03,                           // bNumEndpoints 3 (updated)
-    0x03,                           // bInterfaceClass
+    0x01,                           // bNumEndpoints 1 (notification)
+    0x02,                           // bInterfaceClass: CDC
+    0x02,                           // bInterfaceSubClass: ACM
+    0x01,                           // bInterfaceProtocol: AT commands
+    0x00,                           // iInterface
+
+    /* CDC Header Functional Descriptor (5 bytes) */
+    0x05,                           // bLength
+    0x24,                           // bDescriptorType: CS_INTERFACE
+    0x00,                           // bDescriptorSubType: Header
+    0x10, 0x01,                     // bcdCDC 1.10
+
+    /* CDC ACM Functional Descriptor (4 bytes) */
+    0x04,                           // bLength
+    0x24,                           // bDescriptorType: CS_INTERFACE
+    0x02,                           // bDescriptorSubType: ACM
+    0x02,                           // bmCapabilities: supports Set/GetLineCoding and SetControlLineState
+
+    /* CDC Union Functional Descriptor (5 bytes) */
+    0x05,                           // bLength
+    0x24,                           // bDescriptorType: CS_INTERFACE
+    0x06,                           // bDescriptorSubType: Union
+    0x00,                           // bMasterInterface: 0 (CDC Control)
+    0x01,                           // bSlaveInterface0: 1 (CDC Data)
+
+    /* CDC Call Management Functional Descriptor (5 bytes) */
+    0x05,                           // bLength
+    0x24,                           // bDescriptorType: CS_INTERFACE
+    0x01,                           // bDescriptorSubType: Call Management
+    0x00,                           // bmCapabilities: device handles call management
+    0x01,                           // bDataInterface: 1
+
+    /* Endpoint 3 IN Interrupt - CDC Notification (7 bytes) */
+    0x07,                           // bLength
+    0x05,                           // bDescriptorType (Endpoint)
+    0x83,                           // bEndpointAddress: IN EP3
+    0x03,                           // bmAttributes: Interrupt
+    0x08, 0x00,                     // wMaxPacketSize 8
+    0xFF,                           // bInterval: 255ms
+
+    /* Interface 1 - CDC Data Interface (9 bytes) */
+    0x09,                           // bLength
+    0x04,                           // bDescriptorType (Interface)
+    0x01,                           // bInterfaceNumber 1
+    0x00,                           // bAlternateSetting
+    0x02,                           // bNumEndpoints 2
+    0x0A,                           // bInterfaceClass: CDC Data
     0x00,                           // bInterfaceSubClass
     0x00,                           // bInterfaceProtocol
-    0x00,                           // iInterface (String Index)
+    0x00,                           // iInterface
 
-    /* HID Descriptor */
-    0x09,                           // bLength
-    0x21,                           // bDescriptorType
-    0x11, 0x01,                     // bcdHID
-    0x00,                           // bCountryCode
-    0x01,                           // bNumDescriptors
-    0x22,                           // bDescriptorType
-    DEF_USBD_REPORT_DESC_LEN & 0xFF, DEF_USBD_REPORT_DESC_LEN >> 8, // wDescriptorLength
-
-    /* Endpoint Descriptor - EP1 OUT (data receive) */
+    /* Endpoint 1 OUT Bulk - Data RX from host (7 bytes) */
     0x07,                           // bLength
-    0x05,                           // bDescriptorType
-    0x01,                           // bEndpointAddress: OUT Endpoint 1
-    0x03,                           // bmAttributes (Interrupt)
+    0x05,                           // bDescriptorType (Endpoint)
+    0x01,                           // bEndpointAddress: OUT EP1
+    0x02,                           // bmAttributes: Bulk
     0x40, 0x00,                     // wMaxPacketSize 64
-    0x01,                           // bInterval: 1mS
+    0x00,                           // bInterval (ignored for bulk)
 
-    /* Endpoint Descriptor - EP2 IN (data transmit) */
+    /* Endpoint 2 IN Bulk - Data TX to host (7 bytes) */
     0x07,                           // bLength
-    0x05,                           // bDescriptorType
-    0x82,                           // bEndpointAddress: IN Endpoint 2
-    0x03,                           // bmAttributes (Interrupt)
+    0x05,                           // bDescriptorType (Endpoint)
+    0x82,                           // bEndpointAddress: IN EP2
+    0x02,                           // bmAttributes: Bulk
     0x40, 0x00,                     // wMaxPacketSize 64
-    0x01,                           // bInterval: 1mS
-
-    /* Endpoint Descriptor - EP3 IN (periodic events) */
-    0x07,                           // bLength
-    0x05,                           // bDescriptorType
-    0x83,                           // bEndpointAddress: IN Endpoint 3
-    0x03,                           // bmAttributes (Interrupt)
-    0x40, 0x00,                     // wMaxPacketSize 64
-    0x01,                           // bInterval: 1mS
-};
-
-/* HID Report Descriptor */
-const uint8_t  MyHIDReportDesc[ ] =
-{
-    0x06, 0x00, 0xFF,               // Usage Page (Vendor Defined 0xFF00)
-    0x09, 0x01,                     // Usage (0x01)
-    0xA1, 0x01,                     // Collection (Application)
-    0x09, 0x02,                     //   Usage (0x02)
-    0x26, 0xFF, 0x00,               //   Logical Maximum (255)
-    0x75, 0x08,                     //   Report Size (8)
-    0x15, 0x00,                     //   Logical Minimum (0)
-    0x95, 0x40,                     //   Report Count (64)
-    0x81, 0x06,                     //   Input (Data,Var,Rel,No Wrap,Linear,Preferred State,No Null Position)
-    0x09, 0x02,                     //   Usage (0x02)
-    0x15, 0x00,                     //   Logical Minimum (0)
-    0x26, 0xFF, 0x00,               //   Logical Maximum (255)
-    0x75, 0x08,                     //   Report Size (8)
-    0x95, 0x40,                     //   Report Count (64)
-    0x91, 0x06,                     //   Output (Data,Var,Rel,No Wrap,Linear,Preferred State,No Null Position,Non-volatile)
-    0xC0,                           // End Collection
+    0x00,                           // bInterval (ignored for bulk)
 };
 
 /* Language Descriptor */
@@ -135,4 +149,3 @@ const uint8_t  MySerNumInfo[] =
     0x16, 0x03, '0', 0, '1', 0, '2', 0, '3', 0, '4', 0, '5', 0
               , '6', 0, '7', 0, '8', 0, '9', 0
 };
-

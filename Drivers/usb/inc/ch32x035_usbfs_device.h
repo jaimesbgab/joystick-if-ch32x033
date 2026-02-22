@@ -6,7 +6,7 @@
 * Description        : header file for CH32X035_usbfs_device.c
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
-* Attention: This software (modified or not) and binary are used for 
+* Attention: This software (modified or not) and binary are used for
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 #ifndef __CH32X035_USBFS_DEVICE_H_
@@ -43,11 +43,11 @@
 
 #define USBFSD_UEP_RX_EN            0x08
 #define USBFSD_UEP_TX_EN            0x04
-#define USBFSD_UEP_BUF_MOD          0x01
+#define USBFSD_UEP_BUF_MOD         0x01
 #define DEF_UEP_DMA_LOAD            0 /* Direct the DMA address to the data to be processed */
 #define DEF_UEP_CPY_LOAD            1 /* Use memcpy to move data to a buffer */
 
-/* Ringbuffer define  */
+/* Ring buffer define */
 #define DEF_Ring_Buffer_Max_Blks      16
 #define DEF_RING_BUFFER_SIZE          (DEF_Ring_Buffer_Max_Blks*DEF_USBD_FS_PACK_SIZE)
 #define DEF_RING_BUFFER_REMINE        4
@@ -62,6 +62,19 @@ typedef struct __PACKED _RING_BUFF_COMM
     volatile uint8_t PackLen[DEF_Ring_Buffer_Max_Blks];
     volatile uint8_t StopFlag;
 } RING_BUFF_COMM, pRING_BUFF_COMM;
+
+/* CDC Line Coding structure */
+typedef struct __PACKED _CDC_LINE_CODING
+{
+    uint32_t dwDTERate;    /* Baud rate (bps) */
+    uint8_t  bCharFormat;  /* Stop bits: 0=1, 1=1.5, 2=2 */
+    uint8_t  bParityType;  /* Parity: 0=None, 1=Odd, 2=Even, 3=Mark, 4=Space */
+    uint8_t  bDataBits;    /* Data bits: 5, 6, 7, 8, 16 */
+} CDC_LINE_CODING;
+
+/* CDC Class Request Codes (CDC_SET_LINE_CODING, CDC_GET_LINE_CODING,
+ * CDC_SEND_BREAK already defined in ch32x035_usb.h) */
+#define CDC_SET_CONTROL_LINE_STATE  CDC_SET_LINE_CTLSTE
 
 /* Setup Request Packets */
 #define pUSBFS_SetupReqPak                 ((PUSB_SETUP_REQ)USBFS_EP0_Buf)
@@ -104,13 +117,15 @@ extern __attribute__ ((aligned(4))) uint8_t USBFS_EP0_Buf[];
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP2_Buf[];
 extern __attribute__ ((aligned(4))) uint8_t USBFS_EP3_Buf[];
 
-
 /* USB IN Endpoint Busy Flag */
 extern volatile uint8_t  USBFS_Endp_Busy[ ];
 
 /* Ringbuffer variables */
 extern RING_BUFF_COMM  RingBuffer_Comm;
 extern __attribute__ ((aligned(4))) uint8_t  Data_Buffer[ ];
+
+/* CDC Line Coding (current settings) */
+extern CDC_LINE_CODING CDC_LineCoding;
 
 /******************************************************************************/
 /* external functions */

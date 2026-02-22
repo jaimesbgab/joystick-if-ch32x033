@@ -4,17 +4,17 @@
 * Version            : V1.0.1
 * Date               : 2025/03/10
 * Description        : This file provides all the USBFS firmware functions.
+*                      Configured as USB CDC-ACM (Virtual COM Port).
 *********************************************************************************
 * Copyright (c) 2021 Nanjing Qinheng Microelectronics Co., Ltd.
-* Attention: This software (modified or not) and binary are used for 
+* Attention: This software (modified or not) and binary are used for
 * microcontroller manufactured by Nanjing Qinheng Microelectronics.
 *******************************************************************************/
 
 #include <ch32x035_usbfs_device.h>
-//#include "usbd_compatibility_hid.h"
+
 /*******************************************************************************/
 /* Variable Definition */
-
 
 /* Global */
 const uint8_t    *pUSBFS_Descr;
@@ -32,14 +32,16 @@ volatile uint8_t  USBFS_DevAddr;
 volatile uint8_t  USBFS_DevSleepStatus;
 volatile uint8_t  USBFS_DevEnumStatus;
 
-/* HID Class Command */
-volatile uint8_t USBFS_HidIdle;
-volatile uint8_t USBFS_HidProtocol;
+/* CDC Line Coding - default 115200 baud, 8N1 */
+CDC_LINE_CODING CDC_LineCoding = {
+    .dwDTERate   = 115200,
+    .bCharFormat = 0,   /* 1 stop bit */
+    .bParityType = 0,   /* no parity */
+    .bDataBits   = 8,   /* 8 data bits */
+};
 
-/* HID Report Buffer */
-#define SET_REPORT_WAIT_DEAL  1
-volatile uint8_t HID_Set_Report_Flag = 0;
-__attribute__ ((aligned(4))) uint8_t HID_Report_Buffer[DEF_USBD_UEP0_SIZE];
+/* CDC Control Line State (DTR/RTS bits from host) */
+static volatile uint16_t CDC_ControlLineState = 0;
 
 /* Endpoint Buffer */
 __attribute__ ((aligned(4))) uint8_t USBFS_EP0_Buf[DEF_USBD_UEP0_SIZE];
@@ -49,7 +51,7 @@ __attribute__ ((aligned(4))) uint8_t USBFS_EP3_Buf[DEF_USB_EP3_FS_SIZE];
 /* USB IN Endpoint Busy Flag */
 volatile uint8_t  USBFS_Endp_Busy[ DEF_UEP_NUM ];
 
-/* Ring buffer */
+/* Ring buffer (EP1 OUT reception) */
 RING_BUFF_COMM  RingBuffer_Comm;
 __attribute__ ((aligned(4))) uint8_t Data_Buffer[DEF_RING_BUFFER_SIZE];
 
@@ -76,6 +78,9 @@ void USBFS_RCC_Init(void)
  * @fn      USBFS_Device_Endp_Init
  *
  * @brief   Initializes USB device endpoints.
+ *          EP1 OUT  - CDC data RX from host (bulk)
+ *          EP2 IN   - CDC data TX to host (bulk)
+ *          EP3 IN   - CDC notification (interrupt)
  *
  * @return  none
  */
@@ -164,7 +169,7 @@ void USBFS_Device_Init( FunctionalState sta , PWR_VDD VDD_Voltage)
 /*********************************************************************
  * @fn      USBFS_IRQHandler
  *
- * @brief   This function handles HD-FS exception.
+ * @brief   This function handles USBFS exceptions (CDC-ACM).
  *
  * @return  none
  */
@@ -193,7 +198,7 @@ void USBFS_IRQHandler( void )
 
                         if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) != USB_REQ_TYP_STANDARD )
                         {
-                            /* Non-standard request endpoint 0 Data upload */
+                            /* Non-standard request endpoint 0 Data upload complete */
                         }
                         else
                         {
@@ -213,26 +218,24 @@ void USBFS_IRQHandler( void )
                                     break;
 
                                 default:
-                                        break;
+                                    break;
                             }
                         }
                         break;
 
-                        /* end-point 2 data in interrupt */
-                        case USBFS_UIS_TOKEN_IN | DEF_UEP2:
+                    /* end-point 2 data in interrupt (CDC bulk TX complete) */
+                    case USBFS_UIS_TOKEN_IN | DEF_UEP2:
+                        USBFSD->UEP2_CTRL_H = (USBFSD->UEP2_CTRL_H & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
+                        USBFSD->UEP2_CTRL_H ^= USBFS_UEP_T_TOG;
+                        USBFS_Endp_Busy[ DEF_UEP2 ] = 0;
+                        break;
 
-                            USBFSD->UEP2_CTRL_H = (USBFSD->UEP2_CTRL_H & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
-                            USBFSD->UEP2_CTRL_H ^= USBFS_UEP_T_TOG;
-                            USBFS_Endp_Busy[ DEF_UEP2 ] = 0;
-                            break;
-
-                        /* end-point 3 data in interrupt */
-                        case USBFS_UIS_TOKEN_IN | DEF_UEP3:
-
-                            USBFSD->UEP3_CTRL_H = (USBFSD->UEP3_CTRL_H & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
-                            USBFSD->UEP3_CTRL_H ^= USBFS_UEP_T_TOG;
-                            USBFS_Endp_Busy[ DEF_UEP3 ] = 0;
-                            break;
+                    /* end-point 3 data in interrupt (CDC notification TX complete) */
+                    case USBFS_UIS_TOKEN_IN | DEF_UEP3:
+                        USBFSD->UEP3_CTRL_H = (USBFSD->UEP3_CTRL_H & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_RES_NAK;
+                        USBFSD->UEP3_CTRL_H ^= USBFS_UEP_T_TOG;
+                        USBFS_Endp_Busy[ DEF_UEP3 ] = 0;
+                        break;
 
                     default :
                         break;
@@ -245,37 +248,34 @@ void USBFS_IRQHandler( void )
                 {
                     /* end-point 0 data out interrupt */
                     case USBFS_UIS_TOKEN_OUT | DEF_UEP0:
-                            if( intst & USBFS_UIS_TOG_OK )
+                        if( intst & USBFS_UIS_TOG_OK )
+                        {
+                            if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) == USB_REQ_TYP_CLASS )
                             {
-                                if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) != USB_REQ_TYP_STANDARD )
+                                switch( USBFS_SetupReqCode )
                                 {
-                                    if (( USBFS_SetupReqType & USB_REQ_TYP_MASK ) == USB_REQ_TYP_CLASS)
-                                    {
-                                        switch( USBFS_SetupReqCode )
-                                        {
-                                            case HID_SET_REPORT:
-                                                memcpy(&HID_Report_Buffer[0],USBFS_EP0_Buf,DEF_USBD_UEP0_SIZE);
-                                                HID_Set_Report_Flag = SET_REPORT_WAIT_DEAL;
-                                                USBFSD->UEP0_CTRL_H = (USBFSD->UEP0_CTRL_H & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_TOG | USBFS_UEP_T_RES_NAK;
-                                                break;
-                                            default:
-                                                break;
-                                        }
-                                    }
-                                }
-                                else
-                                {
-                                    /* Standard request end-point 0 Data download */
-                                    /* Add your code here */
+                                    case CDC_SET_LINE_CODING:
+                                        /* Copy 7-byte line coding structure and send ZLP status */
+                                        memcpy(&CDC_LineCoding, USBFS_EP0_Buf, sizeof(CDC_LINE_CODING));
+                                        USBFSD->UEP0_TX_LEN = 0;
+                                        USBFSD->UEP0_CTRL_H = (USBFSD->UEP0_CTRL_H & ~USBFS_UEP_T_RES_MASK) | USBFS_UEP_T_TOG | USBFS_UEP_T_RES_ACK;
+                                        break;
+                                    default:
+                                        break;
                                 }
                             }
-                            break;
+                            else
+                            {
+                                /* Standard request end-point 0 Data download */
+                            }
+                        }
+                        break;
 
-                    /* end-point 1 data out interrupt */
+                    /* end-point 1 data out interrupt (CDC bulk RX from host) */
                     case USBFS_UIS_TOKEN_OUT | DEF_UEP1:
                         if ( intst & USBFS_UIS_TOG_OK )
                         {
-                            /* Write In Buffer */
+                            /* Write into ring buffer */
                             USBFSD->UEP1_CTRL_H ^= USBFS_UEP_R_TOG;
                             RingBuffer_Comm.PackLen[RingBuffer_Comm.LoadPtr] = USBFSD->RX_LEN;
                             RingBuffer_Comm.LoadPtr ++;
@@ -292,9 +292,9 @@ void USBFS_IRQHandler( void )
                             }
                         }
                         break;
+
                     default:
                         break;
-
                 }
                 break;
 
@@ -312,69 +312,30 @@ void USBFS_IRQHandler( void )
                 errflag = 0;
                 if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) != USB_REQ_TYP_STANDARD )
                 {
-                    if (( USBFS_SetupReqType & USB_REQ_TYP_MASK ) == USB_REQ_TYP_CLASS)
+                    /* CDC Class Requests */
+                    if ( ( USBFS_SetupReqType & USB_REQ_TYP_MASK ) == USB_REQ_TYP_CLASS )
                     {
                         switch( USBFS_SetupReqCode )
                         {
-                            case HID_SET_REPORT:
+                            case CDC_GET_LINE_CODING:
+                                /* Return current line coding (7 bytes) */
+                                memcpy(USBFS_EP0_Buf, &CDC_LineCoding, sizeof(CDC_LINE_CODING));
+                                len = sizeof(CDC_LINE_CODING);
                                 break;
 
-                            case HID_GET_REPORT:
-                                if( USBFS_SetupReqIndex == 0x00 )
-                                {
-                                    len = DEF_USBD_UEP0_SIZE;
-                                    memcpy(USBFS_EP0_Buf,&HID_Report_Buffer[0],DEF_USBD_UEP0_SIZE);
-                                }
-                                else
-                                {
-                                    errflag = 0xFF;
-                                }
+                            case CDC_SET_LINE_CODING:
+                                /* 7 bytes will arrive in EP0 OUT data phase */
                                 break;
 
-                            case HID_SET_IDLE:
-                                if( USBFS_SetupReqIndex == 0x00 )
-                                {
-                                    USBFS_HidIdle = USBFS_EP0_Buf[ 3 ];
-                                }
-                                else
-                                {
-                                    errflag = 0xFF;
-                                }
+                            case CDC_SET_CONTROL_LINE_STATE:
+                                /* wValue: bit0=DTR, bit1=RTS */
+                                CDC_ControlLineState = USBFS_SetupReqValue;
                                 break;
 
-                            case HID_SET_PROTOCOL:
-                                if( USBFS_SetupReqIndex == 0x00 )
-                                {
-                                    USBFS_HidProtocol = USBFS_EP0_Buf[ 2 ];
-                                }
-                                else
-                                {
-                                    errflag = 0xFF;
-                                }
+                            case CDC_SEND_BREAK:
+                                /* Ignore break signal */
                                 break;
 
-                            case HID_GET_IDLE:
-                                if( USBFS_SetupReqIndex == 0x00 )
-                                {
-                                    USBFS_EP0_Buf[ 0 ] = USBFS_HidIdle;
-                                    len = 1;
-                                }
-                                else
-                                {
-                                    errflag = 0xFF;
-                                }
-                                break;
-                            case HID_GET_PROTOCOL:
-                                if( USBFS_SetupReqIndex == 0x00 )
-                                {
-                                    USBFS_EP0_Buf[ 0 ] = USBFS_HidProtocol;
-                                    len = 1;
-                                }
-                                else
-                                {
-                                    errflag = 0xFF;
-                                }
-                                break;
                             default:
                                 errflag = 0xFF;
                                 break;
@@ -383,10 +344,10 @@ void USBFS_IRQHandler( void )
                 }
                 else
                 {
-                    /* usb standard request processing */
+                    /* USB standard request processing */
                     switch( USBFS_SetupReqCode )
                     {
-                        /* get device/configuration/string/report/... descriptors */
+                        /* get device/configuration/string descriptors */
                         case USB_GET_DESCRIPTOR:
                             switch( (uint8_t)(USBFS_SetupReqValue>>8) )
                             {
@@ -400,30 +361,6 @@ void USBFS_IRQHandler( void )
                                 case USB_DESCR_TYP_CONFIG:
                                     pUSBFS_Descr = MyCfgDescr;
                                     len = DEF_USBD_CONFIG_DESC_LEN;
-                                    break;
-                              /* get usb report descriptor */
-                              case USB_DESCR_TYP_REPORT:
-                                    if (USBFS_SetupReqIndex == 0)
-                                    {
-                                        pUSBFS_Descr = MyHIDReportDesc;
-                                        len = DEF_USBD_REPORT_DESC_LEN;
-                                    }
-                                    else
-                                    {
-                                        errflag = 0xFF;
-                                    }
-                                    break;
-                                /* get hid descriptor */
-                                case USB_DESCR_TYP_HID:
-                                    if (USBFS_SetupReqIndex == 0)
-                                    {
-                                        pUSBFS_Descr = &MyCfgDescr[18];
-                                        len = 0x09;
-                                    }
-                                    else
-                                    {
-                                        errflag = 0xFF;
-                                    }
                                     break;
 
                                 /* get usb string descriptor */
@@ -499,10 +436,8 @@ void USBFS_IRQHandler( void )
                         case USB_CLEAR_FEATURE:
                             if( ( USBFS_SetupReqType & USB_REQ_RECIP_MASK ) == USB_REQ_RECIP_DEVICE )
                             {
-                                /* clear one device feature */
                                 if( (uint8_t)( USBFS_SetupReqValue & 0xFF ) == USB_REQ_FEAT_REMOTE_WAKEUP )
                                 {
-                                    /* clear usb sleep status, device not prepare to sleep */
                                     USBFS_DevSleepStatus &= ~0x01;
                                 }
                             }
@@ -513,18 +448,15 @@ void USBFS_IRQHandler( void )
                                     switch( (uint8_t)(USBFS_SetupReqIndex&0xFF) )
                                     {
                                         case ( DEF_UEP_OUT | DEF_UEP1 ):
-                                            /* Set End-point 1 OUT ACK */
-                                            USBFSD->UEP1_CTRL_H =  USBFS_UEP_R_RES_ACK;
+                                            USBFSD->UEP1_CTRL_H = USBFS_UEP_R_RES_ACK;
                                             break;
 
                                         case ( DEF_UEP_IN | DEF_UEP2 ):
-                                            /* Set End-point 2 IN NAK */
-                                            USBFSD->UEP2_CTRL_H =  USBFS_UEP_T_RES_NAK;
+                                            USBFSD->UEP2_CTRL_H = USBFS_UEP_T_RES_NAK;
                                             break;
 
                                         case ( DEF_UEP_IN | DEF_UEP3 ):
-                                            /* Set End-point 3 IN NAK */
-                                            USBFSD->UEP3_CTRL_H =  USBFS_UEP_T_RES_NAK;
+                                            USBFSD->UEP3_CTRL_H = USBFS_UEP_T_RES_NAK;
                                             break;
 
                                         default:
@@ -547,12 +479,10 @@ void USBFS_IRQHandler( void )
                         case USB_SET_FEATURE:
                             if( ( USBFS_SetupReqType & USB_REQ_RECIP_MASK ) == USB_REQ_RECIP_DEVICE )
                             {
-                                /* Set Device Feature */
                                 if( (uint8_t)( USBFS_SetupReqValue & 0xFF ) == USB_REQ_FEAT_REMOTE_WAKEUP )
                                 {
                                     if( MyCfgDescr[ 7 ] & 0x20 )
                                     {
-                                        /* Set Wake-up flag, device prepare to sleep */
                                         USBFS_DevSleepStatus |= 0x01;
                                     }
                                     else
@@ -567,15 +497,14 @@ void USBFS_IRQHandler( void )
                             }
                             else if( ( USBFS_SetupReqType & USB_REQ_RECIP_MASK ) == USB_REQ_RECIP_ENDP )
                             {
-                                /* Set End-point Feature */
                                 if( (uint8_t)( USBFS_SetupReqValue & 0xFF ) == USB_REQ_FEAT_ENDP_HALT )
                                 {
-
                                     switch( (uint8_t)(USBFS_SetupReqIndex&0xFF) )
                                     {
                                         case ( DEF_UEP_OUT | DEF_UEP1 ):
                                             USBFSD->UEP1_CTRL_H = ( USBFSD->UEP1_CTRL_H & ~USBFS_UEP_R_RES_MASK ) | USBFS_UEP_R_RES_STALL;
                                             break;
+
                                         case ( DEF_UEP_IN | DEF_UEP2 ):
                                             USBFSD->UEP2_CTRL_H = ( USBFSD->UEP2_CTRL_H & ~USBFS_UEP_T_RES_MASK ) | USBFS_UEP_T_RES_STALL;
                                             break;
@@ -600,7 +529,6 @@ void USBFS_IRQHandler( void )
                             }
                             break;
 
-                        /* This request allows the host to select another setting for the specified interface  */
                         case USB_GET_INTERFACE:
                             USBFS_EP0_Buf[0] = 0x00;
                             if ( USBFS_SetupReqLen > 1 )
@@ -626,7 +554,7 @@ void USBFS_IRQHandler( void )
                             }
                             else if( ( USBFS_SetupReqType & USB_REQ_RECIP_MASK ) == USB_REQ_RECIP_ENDP )
                             {
-                                if((uint8_t)(USBFS_SetupReqIndex&0xFF) == ( DEF_UEP_OUT |DEF_UEP1 ))
+                                if((uint8_t)(USBFS_SetupReqIndex&0xFF) == ( DEF_UEP_OUT | DEF_UEP1 ))
                                 {
                                     if( ( USBFSD->UEP1_CTRL_H & USBFS_UEP_R_RES_MASK ) == USBFS_UEP_R_RES_STALL )
                                     {
@@ -661,7 +589,6 @@ void USBFS_IRQHandler( void )
                             {
                                 USBFS_SetupReqLen = 2;
                             }
-
                             break;
 
                         default:
@@ -670,10 +597,9 @@ void USBFS_IRQHandler( void )
                     }
                 }
 
-                /* errflag = 0xFF means a request not support or some errors occurred, else correct */
+                /* errflag = 0xFF means a request not supported or some errors occurred */
                 if( errflag == 0xFF)
                 {
-                    /* if one request not support, return stall */
                     USBFSD->UEP0_CTRL_H = USBFS_UEP_T_TOG|USBFS_UEP_T_RES_STALL|USBFS_UEP_R_TOG|USBFS_UEP_R_RES_STALL;
                 }
                 else
@@ -739,7 +665,6 @@ void USBFS_IRQHandler( void )
         {
             USBFS_DevSleepStatus &= ~0x02;
         }
-
     }
     else
     {
@@ -747,4 +672,3 @@ void USBFS_IRQHandler( void )
         USBFSD->INT_FG = intflag;
     }
 }
-

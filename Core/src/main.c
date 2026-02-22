@@ -8,23 +8,11 @@
 
 #include "ch32x035_conf.h"
 
-#include "uart.h"
 #include "delay.h"
 #include "timer.h"
 #include "gpio.h"
 #include "usb.h"
 #include "log.h"
-
-/**
- * @brief Dummy flush function for xprintf
- *
- * Empty flush function provided to xprintf. Since UART transmission
- * is blocking, no additional flushing is needed.
- *
- * @return None
- */
-void uart_dummy_flush(void) {
-}
 
 /**
  * @brief Main application entry point
@@ -50,10 +38,10 @@ int main(void)
     /* Initizalize Peripherals */
     delay_init();
     timer_init();      // Initialize TIM1 for 1ms tick (required for I2C timeouts)
-    uart_init();
     gpio_init();
+    usb_init();
 
-    xprintf_init(uart_putc, uart_dummy_flush);
+    xprintf_init(usb_putc, usb_flush);
 
     LOG_INFO("System initialized");
     LOG_INFO("Timer tick: %lu ms", get_tick());
