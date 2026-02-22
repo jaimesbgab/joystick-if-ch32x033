@@ -31,7 +31,7 @@
 #define INTERF_STR          "CDC-Serial"
 
 #include "ch32x035.h"
-//#include "ch32x035_adc.h"
+#include "ch32x035_adc.h"
 //#include "ch32x035_awu.h"
 //#include "ch32x035_dbgmcu.h"
 //#include "ch32x035_dma.h"
