@@ -31,11 +31,11 @@ extern "C" {
 /** Enable (1) or disable (0) debug log output from the joystick driver.
  *  Override at the compiler command line: -DJOYSTICK_DEBUG=0            */
 #ifndef JOYSTICK_DEBUG
-#define JOYSTICK_DEBUG  1
+#define JOYSTICK_DEBUG  0
 #endif
 
 /** Polling period in milliseconds. */
-#define JOYSTICK_POLL_PERIOD_MS   250U
+#define JOYSTICK_POLL_PERIOD_MS   50U
 
 /** 12-bit ADC full-scale count. */
 #define JOYSTICK_ADC_MAX          4095U

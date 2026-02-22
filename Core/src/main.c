@@ -13,7 +13,19 @@
 #include "gpio.h"
 #include "usb.h"
 #include "joystick.h"
+#include "joystick_events.h"
 #include "log.h"
+
+/**
+ * @brief Example joystick event handler.
+ *
+ * Replace or extend this with application-specific logic.
+ */
+static void on_joystick_event(joystick_event_t event, void *user_data)
+{
+    (void)user_data;
+    LOG_INFO("joystick -> %s", joystick_event_name(event));
+}
 
 /**
  * @brief Main application entry point
@@ -42,15 +54,19 @@ int main(void)
     gpio_init();
     usb_init();
     joystick_init();
+    joystick_events_init();
 
     xprintf_init(usb_putc, usb_flush);
+
+    /* Example: subscribe a navigation handler. */
+    joystick_events_subscribe(on_joystick_event, NULL);
 
     LOG_INFO("System initialized");
     LOG_INFO("Timer tick: %lu ms", get_tick());
 
     while(1)
     {
-        joystick_poll();
+        joystick_events_poll();
         delay_ms(10);
     }
 }
