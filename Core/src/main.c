@@ -2,8 +2,9 @@
  * @file main.c
  * @brief Main application entry point for CH32X035
  *
- * This file contains the main application code that initializes peripherals
- * and runs the main program loop with LED toggling and logging functionality.
+ * Reads an analog joystick (VRx/VRy/SW) and forwards directional and button
+ * commands over UART as single-byte device_cmd_t values.  Log output is
+ * routed to the USB CDC serial port.
  */
 
 #include "ch32x035_conf.h"
@@ -14,51 +15,105 @@
 #include "usb.h"
 #include "joystick.h"
 #include "joystick_events.h"
+#include "uart.h"
 #include "log.h"
 
 /**
- * @brief Example joystick event handler.
+ * @brief Command byte sent over UART for each joystick event.
  *
- * Replace or extend this with application-specific logic.
+ * Values start at 1 so that 0 is never a valid command, making it easy
+ * for the receiver to detect framing errors or idle lines.
+ */
+typedef enum {
+  DEVICE_CMD_UP    = 1,
+  DEVICE_CMD_DOWN  = 2,
+  DEVICE_CMD_LEFT  = 3,
+  DEVICE_CMD_RIGHT = 4,
+  DEVICE_CMD_PRESS = 5,
+} device_cmd_t;
+
+/**
+ * @brief Transmit a device command over UART.
+ *
+ * Validates that @p cmd is within the defined range before sending.
+ * Out-of-range values are silently discarded.
+ *
+ * @param cmd  Command to send.
+ */
+void send_cmd(device_cmd_t cmd)
+{
+    if ((uint8_t)cmd < (uint8_t)DEVICE_CMD_UP ||
+        (uint8_t)cmd > (uint8_t)DEVICE_CMD_PRESS) {
+        return;
+    }
+
+    uart_putc((char)cmd);
+}
+
+/**
+ * @brief Joystick event handler — maps events to device commands.
+ *
+ * Registered via joystick_events_subscribe().  Logs the event name and
+ * forwards directional and press events as device_cmd_t bytes over UART.
+ * CENTER and RELEASE events are intentionally not forwarded.
  */
 static void on_joystick_event(joystick_event_t event, void *user_data)
 {
     (void)user_data;
     LOG_INFO("joystick -> %s", joystick_event_name(event));
+
+    switch (event) {
+        case JOYSTICK_EVENT_UP:
+            send_cmd(DEVICE_CMD_UP);
+            break;
+        case JOYSTICK_EVENT_DOWN:
+            send_cmd(DEVICE_CMD_DOWN);
+            break;
+        case JOYSTICK_EVENT_LEFT:
+            send_cmd(DEVICE_CMD_LEFT);
+            break;
+        case JOYSTICK_EVENT_RIGHT:
+            send_cmd(DEVICE_CMD_RIGHT);
+            break;
+        case JOYSTICK_EVENT_PRESS:
+            send_cmd(DEVICE_CMD_PRESS);
+            break;
+        default:
+            break;
+    }
 }
 
 /**
- * @brief Main application entry point
- *
- * Initializes the system and peripherals, then enters an infinite loop
- * that toggles the running LED and outputs log messages every 500ms.
+ * @brief Main application entry point.
  *
  * Initialization sequence:
- * 1. Configure NVIC priority grouping
- * 2. Update system core clock
- * 3. Initialize delay functions
- * 4. Initialize UART for logging
- * 5. Initialize GPIO for LED control
- * 6. Configure xprintf output
+ * 1. Configure NVIC priority grouping and update system clock
+ * 2. Initialize delay and timer (1 ms tick)
+ * 3. Initialize UART (command output) and USB CDC (log output)
+ * 4. Initialize joystick driver and event layer
+ * 5. Route xprintf log output to USB CDC
+ * 6. Subscribe the joystick event handler
  *
- * @return Never returns (infinite loop)
+ * The main loop calls joystick_events_poll() every 10 ms; the event
+ * layer itself is time-gated to JOYSTICK_POLL_PERIOD_MS (50 ms).
+ *
+ * @return Never returns (infinite loop).
  */
 int main(void)
 {
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_1);
     SystemCoreClockUpdate();
 
-    /* Initizalize Peripherals */
+    /* Initialize peripherals */
     delay_init();
-    timer_init();      // Initialize TIM1 for 1ms tick (required for I2C timeouts)
-    gpio_init();
+    timer_init();      /* TIM1 — 1 ms tick used by joystick poll gating */
+    uart_init();
     usb_init();
     joystick_init();
     joystick_events_init();
 
     xprintf_init(usb_putc, usb_flush);
 
-    /* Example: subscribe a navigation handler. */
     joystick_events_subscribe(on_joystick_event, NULL);
 
     LOG_INFO("System initialized");
